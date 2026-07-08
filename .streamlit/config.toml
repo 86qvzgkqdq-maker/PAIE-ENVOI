@@ -1,0 +1,7 @@
+# En local : accès limité à ce Mac (les collègues passent par la version
+# cloud). Ce réglage est ignoré par Streamlit Community Cloud.
+[server]
+address = "127.0.0.1"
+
+[browser]
+gatherUsageStats = false
