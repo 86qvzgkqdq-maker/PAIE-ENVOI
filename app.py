@@ -5,6 +5,7 @@ Lancement : .venv/bin/streamlit run app.py
 
 import io
 import os
+import re
 import smtplib
 import time
 from pathlib import Path
@@ -40,7 +41,14 @@ except Exception:
 st.set_page_config(page_title="Paie & Relevés", page_icon="📨", layout="wide")
 
 # ------------------------------------------------------------- accès protégé
-MDP_HASH = os.getenv("APP_MDP_SHA256", "")
+MDP_HASH = os.getenv("APP_MDP_SHA256", "").strip()
+if MDP_HASH and not re.fullmatch(r"[0-9a-fA-F]{64}", MDP_HASH):
+    st.error(
+        "⚠️ Configuration : le secret `APP_MDP_SHA256` est mal formé "
+        "(il doit contenir exactement 64 caractères hexadécimaux, sans "
+        "espaces ni « … »). Corrigez-le dans Manage app → Settings → Secrets."
+    )
+    st.stop()
 if MDP_HASH and not st.session_state.get("authentifie"):
     st.title("🔒 Accès protégé")
     saisie = st.text_input("Mot de passe", type="password")

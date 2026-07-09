@@ -9,4 +9,11 @@ def hacher(mot_de_passe: str) -> str:
 
 
 def verifier(mot_de_passe: str, hachage_attendu: str) -> bool:
-    return hmac.compare_digest(hacher(mot_de_passe), hachage_attendu)
+    # comparaison en bytes : jamais de TypeError, même si le hachage stocké
+    # contient des caractères parasites (copier-coller malheureux) — dans ce
+    # cas la comparaison échoue simplement
+    attendu = str(hachage_attendu or "").strip().strip("\"'").lower()
+    return hmac.compare_digest(
+        hacher(mot_de_passe).encode("utf-8"),
+        attendu.encode("utf-8", errors="replace"),
+    )
