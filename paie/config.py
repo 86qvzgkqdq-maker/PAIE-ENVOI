@@ -52,6 +52,9 @@ HEBERGEURS_MX = [
     ("infomaniak", ("mail.infomaniak.com", 465, "Infomaniak")),
     ("zoho.eu", ("smtp.zoho.eu", 465, "Zoho")),
     ("zoho.com", ("smtp.zoho.eu", 465, "Zoho")),
+    # Viaduc (registrar FR) : MX en marque blanche « mymail.eu.com »,
+    # mais le certificat TLS n'est valable que pour smtp.viaduc.fr
+    ("mymail.eu.com", ("smtp.viaduc.fr", 587, "Viaduc")),
 ]
 
 
