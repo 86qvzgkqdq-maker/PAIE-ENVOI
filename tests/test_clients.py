@@ -36,6 +36,20 @@ def test_entetes_en_ligne_2_avec_titre_et_nom_complet(tmp_path):
     assert (client.nom, client.prenom) == ("PAULCAN", "Thierry")
 
 
+def test_doublons_exacts_supprimes_homonymes_gardes(tmp_path):
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Nom", "Prénom", "Email"])
+    ws.append(["CAYOL", "Alex", "cayolalex@gmail.com"])
+    ws.append(["CAYOL", "Alex", "cayolalex@gmail.com"])     # doublon exact -> supprimé
+    ws.append(["CAYOL", "Alex", "autre.cayol@gmail.com"])   # homonyme -> gardé
+    chemin = tmp_path / "c.xlsx"
+    wb.save(chemin)
+    clients = charger_clients(chemin)
+    assert len(clients) == 2
+    assert {c.email for c in clients} == {"cayolalex@gmail.com", "autre.cayol@gmail.com"}
+
+
 def test_colonne_manquante(tmp_path):
     wb = Workbook()
     ws = wb.active

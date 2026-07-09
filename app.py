@@ -259,23 +259,38 @@ with onglet_envois:
         "(à défaut, dans le nom du fichier). Corrigez manuellement si besoin."
     )
 
+    # homonymes (même nom+prénom, emails différents) : le rapprochement par
+    # nom ne peut pas les distinguer -> à contrôler à la main
+    par_cle = {}
+    for c in clients:
+        par_cle.setdefault(c.cle, []).append(c)
+    homonymes = [groupe for groupe in par_cle.values() if len(groupe) > 1]
+    if homonymes:
+        st.warning(
+            "⚠️ Homonymes dans la liste clients (même nom et prénom, emails "
+            "différents) : "
+            + " ; ".join(g[0].affichage for g in homonymes)
+            + " — le rapprochement automatique ne peut pas les distinguer, "
+            "vérifiez leurs documents à la main ci-dessous."
+        )
+
     selection = {}
     en_tete = st.columns([3, 4, 4, 2])
     for col, titre in zip(en_tete, ["**Client**", "**Bulletin de paie**", "**Relevé**", "**État**"]):
         col.markdown(titre)
 
-    for client in clients:
+    for i, client in enumerate(clients):
         auto_bp, nb_bp = _auto_choix(client, bulletins)
         auto_rel, nb_rel = _auto_choix(client, releves)
         c1, c2, c3, c4 = st.columns([3, 4, 4, 2])
         c1.write(f"{client.affichage}\n\n`{client.email}`")
         choix_bp = c2.selectbox(
             "Bulletin", options_bp, index=options_bp.index(auto_bp),
-            key=f"bp_{client.cle}", label_visibility="collapsed",
+            key=f"bp_{i}", label_visibility="collapsed",
         )
         choix_rel = c3.selectbox(
             "Relevé", options_rel, index=options_rel.index(auto_rel),
-            key=f"rel_{client.cle}", label_visibility="collapsed",
+            key=f"rel_{i}", label_visibility="collapsed",
         )
         if choix_bp != AUCUN and choix_rel != AUCUN:
             etat = "✅"
@@ -284,7 +299,7 @@ with onglet_envois:
         else:
             etat = "❌ incomplet"
         c4.write(etat)
-        selection[client.cle] = (client, choix_bp, choix_rel)
+        selection[i] = (client, choix_bp, choix_rel)
 
     complets = [(c, bp, rel) for c, bp, rel in selection.values()
                 if bp != AUCUN and rel != AUCUN]

@@ -87,13 +87,20 @@ def charger_clients(fichier) -> list[Client]:
         )
 
     clients = []
+    deja_vus = set()  # dédoublonnage : même nom+prénom ET même email
     for ligne in lignes:
         def val(cle):
             v = ligne[colonnes[cle]] if colonnes[cle] < len(ligne) else None
             return str(v).strip() if v is not None else ""
 
         nom, prenom, email = val("nom"), val("prenom"), val("email")
-        if nom and prenom and email:
-            clients.append(Client(nom=nom, prenom=prenom, email=email))
+        if not (nom and prenom and email):
+            continue
+        client = Client(nom=nom, prenom=prenom, email=email)
+        identite = (client.cle, email.lower())
+        if identite in deja_vus:
+            continue
+        deja_vus.add(identite)
+        clients.append(client)
     wb.close()
     return clients
