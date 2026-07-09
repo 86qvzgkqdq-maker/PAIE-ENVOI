@@ -23,11 +23,24 @@ def test_ordre_colonnes_indifferent(tmp_path):
     assert (client.nom, client.prenom, client.email) == ("Petit", "Léa", "a@b.fr")
 
 
+def test_entetes_en_ligne_2_avec_titre_et_nom_complet(tmp_path):
+    """Cas réel : ligne de titre au-dessus, colonne « Nom complet » à côté."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["liste_coop"])
+    ws.append(["Nom complet", "Prénom", "Nom", "Email"])
+    ws.append(["Thierry PAULCAN", "Thierry", "PAULCAN", "t.paulcan@exemple.fr"])
+    chemin = tmp_path / "c.xlsx"
+    wb.save(chemin)
+    (client,) = charger_clients(chemin)
+    assert (client.nom, client.prenom) == ("PAULCAN", "Thierry")
+
+
 def test_colonne_manquante(tmp_path):
     wb = Workbook()
     ws = wb.active
     ws.append(["Nom", "Email"])
     chemin = tmp_path / "c.xlsx"
     wb.save(chemin)
-    with pytest.raises(ErreurColonnes, match="prenom"):
+    with pytest.raises(ErreurColonnes, match="introuvable"):
         charger_clients(chemin)

@@ -27,17 +27,31 @@ class ErreurColonnes(ValueError):
 
 
 def _reperer_colonnes(entetes) -> dict:
-    """Repère les colonnes nom / prénom / email d'après les en-têtes."""
+    """Repère les colonnes nom / prénom / email d'après les en-têtes.
+
+    Les en-têtes exacts (« Nom ») priment sur les approchants (« Nom
+    complet »), pour ne pas confondre les deux si les deux existent.
+    """
+    normes = [normaliser(e or "").lower() for e in entetes]
     colonnes = {}
-    for i, entete in enumerate(entetes):
-        e = normaliser(entete or "").lower()
-        if not e:
+    # 1) correspondances exactes
+    for i, e in enumerate(normes):
+        if e == "prenom" and "prenom" not in colonnes:
+            colonnes["prenom"] = i
+        elif e == "nom" and "nom" not in colonnes:
+            colonnes["nom"] = i
+        elif e in ("email", "e mail", "mail", "courriel", "adresse mail",
+                   "adresse email") and "email" not in colonnes:
+            colonnes["email"] = i
+    # 2) repli : l'en-tête contient le mot
+    for i, e in enumerate(normes):
+        if not e or i in colonnes.values():
             continue
         if "prenom" in e and "prenom" not in colonnes:
             colonnes["prenom"] = i
         elif ("mail" in e or "courriel" in e) and "email" not in colonnes:
             colonnes["email"] = i
-        elif "nom" in e and "nom" not in colonnes:
+        elif "nom" in e and "prenom" not in e and "nom" not in colonnes:
             colonnes["nom"] = i
     return colonnes
 
@@ -52,18 +66,24 @@ def charger_clients(fichier) -> list[Client]:
     wb = load_workbook(fichier, read_only=True, data_only=True)
     ws = wb.active
     lignes = ws.iter_rows(values_only=True)
-    try:
-        entetes = next(lignes)
-    except StopIteration:
-        raise ErreurColonnes("Le fichier Excel est vide.")
 
-    colonnes = _reperer_colonnes(entetes)
-    manquantes = {"nom", "prenom", "email"} - set(colonnes)
-    if manquantes:
+    # la ligne d'en-têtes n'est pas forcément la première (titre au-dessus…) :
+    # on la cherche dans les 10 premières lignes
+    colonnes = None
+    for _ in range(10):
+        try:
+            candidate = next(lignes)
+        except StopIteration:
+            break
+        reperees = _reperer_colonnes(candidate)
+        if {"nom", "prenom", "email"} <= set(reperees):
+            colonnes = reperees
+            break
+    if colonnes is None:
         raise ErreurColonnes(
-            "Colonnes introuvables dans l'Excel : "
-            + ", ".join(sorted(manquantes))
-            + ". En-têtes attendus : Nom, Prénom, Email (la casse et les accents sont ignorés)."
+            "Ligne d'en-têtes introuvable dans l'Excel : il faut une ligne "
+            "avec les colonnes Nom, Prénom et Email (la casse et les accents "
+            "sont ignorés), dans les 10 premières lignes du fichier."
         )
 
     clients = []
