@@ -9,6 +9,18 @@ def test_nom_fichier_sur():
     assert nom_fichier_sur("Juin 2026") == "Juin_2026"
 
 
+def test_fusion_source_unique_mode_hebdo(tmp_path):
+    """Le mode hebdomadaire prépare un PDF à partir du seul relevé."""
+    releve = pdf_avec_texte("RELEVE HEBDO", "DUPE Jean-Francois")
+    destination = tmp_path / "DUPE_Jean_Francois_Semaine_28.pdf"
+
+    fusionner([releve], destination)
+
+    lecteur = PdfReader(destination)
+    assert len(lecteur.pages) == 1
+    assert "HEBDO" in lecteur.pages[0].extract_text()
+
+
 def test_fusion_concatene_les_pages(tmp_path):
     bulletin = pdf_avec_texte("BULLETIN DE PAIE", "DUPE Jean-Francois")
     releve = pdf_avec_texte("RELEVE THESEE", "DUPE Jean-Francois")

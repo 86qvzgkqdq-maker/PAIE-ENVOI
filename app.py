@@ -72,6 +72,13 @@ CORPS_DEFAUT = (
     "mensuel pour la période : {periode}.\n\n"
     "Bien cordialement,"
 )
+SUJET_HEBDO = "Votre relevé hebdomadaire — {periode}"
+CORPS_HEBDO = (
+    "Bonjour {prenom},\n\n"
+    "Veuillez trouver ci-joint votre relevé hebdomadaire pour la période : "
+    "{periode}.\n\n"
+    "Bien cordialement,"
+)
 
 
 def _texte_document(fichier_upload) -> str:
@@ -96,7 +103,7 @@ def _auto_choix(client, fichiers) -> tuple[str, int]:
 # ---------------------------------------------------------------- barre latérale
 with st.sidebar:
     st.header("Paramètres")
-    periode = st.text_input("Période", placeholder="ex. Juin 2026")
+    periode = st.text_input("Période", placeholder="ex. Juin 2026 · Semaine 28")
 
     if config_manquante():
         st.warning("Envoi d'emails non configuré : renseignez votre adresse "
@@ -219,6 +226,12 @@ with onglet_config:
 
 # ---------------------------------------------------------------- onglet : envois
 with onglet_envois:
+    mode_hebdo = st.radio(
+        "Type d'envoi",
+        ["📅 Mensuel — bulletin de paie + relevé", "🗓️ Hebdomadaire — relevé seul"],
+        horizontal=True,
+    ).startswith("🗓️")
+
     # --- étape 1 : clients
     st.header("1 · Fichier clients (Excel)")
     fichier_excel = st.file_uploader(
@@ -242,21 +255,30 @@ with onglet_envois:
 
     # --- étape 2 : documents
     st.header("2 · Documents PDF")
-    col_bp, col_rel = st.columns(2)
-    with col_bp:
-        bulletins = st.file_uploader(
-            "Bulletins de paie", type=["pdf"], accept_multiple_files=True, key="bp"
-        )
-    with col_rel:
+    if mode_hebdo:
+        bulletins = []
         releves = st.file_uploader(
-            "Relevés mensuels (Thésée)", type=["pdf"], accept_multiple_files=True, key="rel"
+            "Relevés hebdomadaires (Thésée)", type=["pdf"],
+            accept_multiple_files=True, key="rel_hebdo",
         )
+    else:
+        col_bp, col_rel = st.columns(2)
+        with col_bp:
+            bulletins = st.file_uploader(
+                "Bulletins de paie", type=["pdf"], accept_multiple_files=True, key="bp"
+            )
+        with col_rel:
+            releves = st.file_uploader(
+                "Relevés mensuels (Thésée)", type=["pdf"], accept_multiple_files=True, key="rel"
+            )
 
     # --- étape 3 : rapprochement
     st.header("3 · Rapprochement par nom / prénom")
 
-    if not (clients and bulletins and releves):
-        st.info("Chargez le fichier clients, des bulletins et des relevés pour continuer.")
+    if not (clients and releves and (bulletins or mode_hebdo)):
+        st.info("Chargez le fichier clients et les relevés pour continuer."
+                if mode_hebdo else
+                "Chargez le fichier clients, des bulletins et des relevés pour continuer.")
         st.stop()
 
     options_bp = [AUCUN] + [f.name for f in bulletins]
@@ -283,63 +305,81 @@ with onglet_envois:
         )
 
     selection = {}
-    en_tete = st.columns([3, 4, 4, 2])
-    for col, titre in zip(en_tete, ["**Client**", "**Bulletin de paie**", "**Relevé**", "**État**"]):
+    if mode_hebdo:
+        largeurs = [3, 8, 2]
+        titres = ["**Client**", "**Relevé**", "**État**"]
+    else:
+        largeurs = [3, 4, 4, 2]
+        titres = ["**Client**", "**Bulletin de paie**", "**Relevé**", "**État**"]
+    for col, titre in zip(st.columns(largeurs), titres):
         col.markdown(titre)
 
     for i, client in enumerate(clients):
-        auto_bp, nb_bp = _auto_choix(client, bulletins)
         auto_rel, nb_rel = _auto_choix(client, releves)
-        c1, c2, c3, c4 = st.columns([3, 4, 4, 2])
-        c1.write(f"{client.affichage}\n\n`{client.email}`")
-        choix_bp = c2.selectbox(
-            "Bulletin", options_bp, index=options_bp.index(auto_bp),
-            key=f"bp_{i}", label_visibility="collapsed",
-        )
-        choix_rel = c3.selectbox(
+        ligne = st.columns(largeurs)
+        ligne[0].write(f"{client.affichage}\n\n`{client.email}`")
+        if mode_hebdo:
+            choix_bp, nb_bp = AUCUN, 0
+        else:
+            auto_bp, nb_bp = _auto_choix(client, bulletins)
+            choix_bp = ligne[1].selectbox(
+                "Bulletin", options_bp, index=options_bp.index(auto_bp),
+                key=f"bp_{i}", label_visibility="collapsed",
+            )
+        choix_rel = ligne[-2].selectbox(
             "Relevé", options_rel, index=options_rel.index(auto_rel),
             key=f"rel_{i}", label_visibility="collapsed",
         )
-        if choix_bp != AUCUN and choix_rel != AUCUN:
+        if choix_rel != AUCUN and (mode_hebdo or choix_bp != AUCUN):
             etat = "✅"
             if nb_bp > 1 or nb_rel > 1:
                 etat = "⚠️ plusieurs candidats"
         else:
             etat = "❌ incomplet"
-        c4.write(etat)
+        ligne[-1].write(etat)
         selection[i] = (client, choix_bp, choix_rel)
 
     complets = [(c, bp, rel) for c, bp, rel in selection.values()
-                if bp != AUCUN and rel != AUCUN]
+                if rel != AUCUN and (mode_hebdo or bp != AUCUN)]
     st.write(f"**{len(complets)} / {len(clients)}** dossiers complets.")
 
-    # --- étape 4 : fusion
-    st.header("4 · Fusion en un PDF par client")
+    # --- étape 4 : préparation des PDF
+    st.header("4 · Préparation des relevés" if mode_hebdo
+              else "4 · Fusion en un PDF par client")
 
     if not periode:
-        st.info("Indiquez la période dans la barre latérale (elle nomme les fichiers et l'email).")
+        st.info("Indiquez la période dans la barre latérale (elle nomme les fichiers "
+                "et l'email) — ex. « Semaine 28 » en hebdo, « Juin 2026 » en mensuel.")
         st.stop()
 
-    if st.button("Fusionner les dossiers complets", type="primary", disabled=not complets):
+    libelle = ("Préparer les relevés des dossiers complets" if mode_hebdo
+               else "Fusionner les dossiers complets")
+    if st.button(libelle, type="primary", disabled=not complets):
         fichiers_par_nom = {f.name: f for f in list(bulletins) + list(releves)}
         dossier_sortie = DATA / "fusions" / nom_fichier_sur(periode)
-        fusions = []
+        prepares = []
         barre = st.progress(0.0)
         for i, (client, nom_bp, nom_rel) in enumerate(complets):
-            sources = [io.BytesIO(fichiers_par_nom[nom_bp].getvalue()),
-                       io.BytesIO(fichiers_par_nom[nom_rel].getvalue())]
+            noms_sources = [nom_rel] if mode_hebdo else [nom_bp, nom_rel]
+            sources = [io.BytesIO(fichiers_par_nom[n].getvalue()) for n in noms_sources]
             destination = dossier_sortie / (
                 f"{nom_fichier_sur(client.affichage)}_{nom_fichier_sur(periode)}.pdf"
             )
             fusionner(sources, destination)
-            fusions.append({"client": client, "chemin": destination})
+            prepares.append({"client": client, "chemin": destination})
             barre.progress((i + 1) / len(complets))
-        st.session_state["fusions"] = fusions
-        st.success(f"{len(fusions)} PDF fusionné(s) dans `{dossier_sortie}`.")
+        # mémorisés avec leur contexte : pas d'envoi croisé entre modes/périodes
+        st.session_state["fusions"] = {"hebdo": mode_hebdo, "periode": periode,
+                                       "items": prepares}
+        st.success(f"{len(prepares)} PDF prêt(s) dans `{dossier_sortie}`.")
 
-    fusions = st.session_state.get("fusions", [])
+    paquet = st.session_state.get("fusions")
+    fusions = (paquet["items"]
+               if isinstance(paquet, dict) and paquet.get("hebdo") == mode_hebdo
+               and paquet.get("periode") == periode
+               else [])
     if fusions:
-        with st.expander(f"Télécharger les {len(fusions)} PDF fusionnés"):
+        with st.expander(f"Télécharger les {len(fusions)} PDF préparés"):
             for f in fusions:
                 st.download_button(
                     f["chemin"].name,
@@ -353,15 +393,18 @@ with onglet_envois:
     st.header("5 · Envoi par email")
 
     if not fusions:
-        st.info("Fusionnez d'abord les documents.")
+        st.info("Préparez d'abord les documents à l'étape 4 (pour ce mode et "
+                "cette période).")
         st.stop()
 
     if config_manquante():
         st.error("Renseignez votre email dans l'onglet **⚙️ Mon email** avant d'envoyer.")
         st.stop()
 
-    sujet_modele = st.text_input("Sujet", value=SUJET_DEFAUT)
-    corps_modele = st.text_area("Message", value=CORPS_DEFAUT, height=160)
+    sujet_modele = st.text_input(
+        "Sujet", value=SUJET_HEBDO if mode_hebdo else SUJET_DEFAUT)
+    corps_modele = st.text_area(
+        "Message", value=CORPS_HEBDO if mode_hebdo else CORPS_DEFAUT, height=160)
     st.caption("Champs disponibles : `{prenom}`, `{nom}`, `{periode}`")
 
     def _rendre(modele: str, client) -> str:
