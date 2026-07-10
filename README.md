@@ -24,7 +24,9 @@ enregistrés en local dans `.env` — éditable à la main si besoin (`.env.exam
 .venv/bin/streamlit run app.py
 ```
 
-1. **Période** dans la barre latérale (ex. « Juin 2026 »).
+0. **Type d'envoi** en tête de l'onglet : mensuel (bulletin + relevé fusionnés)
+   ou hebdomadaire (relevé seul).
+1. **Période** dans la barre latérale (ex. « Juin 2026 », « Semaine 28 »).
 2. **Excel clients** : colonnes Nom, Prénom, Email (casse/accents indifférents).
 3. **PDF** : glisser les bulletins d'un côté, les relevés Thésée de l'autre.
 4. **Rapprochement** automatique par nom+prénom (dans le texte du PDF, sinon
