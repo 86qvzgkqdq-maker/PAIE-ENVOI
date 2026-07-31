@@ -79,6 +79,34 @@ CORPS_HEBDO = (
     "{periode}.\n\n"
     "Bien cordialement,"
 )
+SUJET_MULTI = "Vos documents — {periode}"
+CORPS_MULTI = (
+    "Bonjour {prenom},\n\n"
+    "Veuillez trouver ci-joint vos documents pour la période : {periode}.\n\n"
+    "Bien cordialement,"
+)
+
+# Libellés / défauts par mode d'envoi
+MODE_LABELS = {
+    "mensuel": "📅 Mensuel — bulletin + relevé (fusionnés)",
+    "hebdo": "🗓️ Hebdomadaire — relevé seul",
+    "multi": "📎 Multi-documents — plusieurs pièces par chauffeur",
+}
+DEFAUTS_EMAIL = {
+    "mensuel": (SUJET_DEFAUT, CORPS_DEFAUT),
+    "hebdo": (SUJET_HEBDO, CORPS_HEBDO),
+    "multi": (SUJET_MULTI, CORPS_MULTI),
+}
+TITRE_ETAPE4 = {
+    "mensuel": "4 · Fusion en un PDF par client",
+    "hebdo": "4 · Préparation des relevés",
+    "multi": "4 · Préparation des documents",
+}
+LIBELLE_PREP = {
+    "mensuel": "Fusionner les dossiers complets",
+    "hebdo": "Préparer les relevés",
+    "multi": "Préparer les documents",
+}
 
 
 def _texte_document(fichier_upload) -> str:
@@ -226,11 +254,10 @@ with onglet_config:
 
 # ---------------------------------------------------------------- onglet : envois
 with onglet_envois:
-    mode_hebdo = st.radio(
-        "Type d'envoi",
-        ["📅 Mensuel — bulletin de paie + relevé", "🗓️ Hebdomadaire — relevé seul"],
-        horizontal=True,
-    ).startswith("🗓️")
+    mode = st.radio(
+        "Type d'envoi", list(MODE_LABELS),
+        format_func=lambda k: MODE_LABELS[k], horizontal=True,
+    )
 
     # --- étape 1 : clients
     st.header("1 · Fichier clients (Excel)")
@@ -254,14 +281,38 @@ with onglet_envois:
                 )
 
     # --- étape 2 : documents
+    # `colonnes_docs` = liste de (libellé, [fichiers]) commune aux 3 modes.
+    # `exiger_tous` : mensuel/hebdo exigent chaque type ; multi = au moins un.
     st.header("2 · Documents PDF")
-    if mode_hebdo:
-        bulletins = []
+    if mode == "multi":
+        st.caption("Un type de document par lot (bulletin, relevé, attestation…). "
+                   "Chaque chauffeur reçoit, dans un seul email, tous les documents "
+                   "qui le concernent, en pièces jointes séparées.")
+        nb_lots = st.number_input(
+            "Nombre de types de documents", min_value=2, max_value=8, value=2, key="multi_nb"
+        )
+        lots = []
+        for i in range(int(nb_lots)):
+            col_nom, col_fic = st.columns([1, 3])
+            label = col_nom.text_input(
+                f"Nom du document {i + 1}", value=f"Document {i + 1}",
+                key=f"multi_label_{i}",
+            )
+            fichiers = col_fic.file_uploader(
+                label or f"Document {i + 1}", type=["pdf"],
+                accept_multiple_files=True, key=f"multi_lot_{i}",
+            )
+            lots.append((label.strip() or f"Document {i + 1}", fichiers or []))
+        colonnes_docs = [(lbl, fics) for lbl, fics in lots if fics]
+        exiger_tous = False
+    elif mode == "hebdo":
         releves = st.file_uploader(
             "Relevés hebdomadaires (Thésée)", type=["pdf"],
             accept_multiple_files=True, key="rel_hebdo",
         )
-    else:
+        colonnes_docs = [("Relevé", releves or [])]
+        exiger_tous = True
+    else:  # mensuel
         col_bp, col_rel = st.columns(2)
         with col_bp:
             bulletins = st.file_uploader(
@@ -271,18 +322,25 @@ with onglet_envois:
             releves = st.file_uploader(
                 "Relevés mensuels (Thésée)", type=["pdf"], accept_multiple_files=True, key="rel"
             )
+        colonnes_docs = [("Bulletin de paie", bulletins or []), ("Relevé", releves or [])]
+        exiger_tous = True
 
     # --- étape 3 : rapprochement
     st.header("3 · Rapprochement par nom / prénom")
 
-    if not (clients and releves and (bulletins or mode_hebdo)):
-        st.info("Chargez le fichier clients et les relevés pour continuer."
-                if mode_hebdo else
-                "Chargez le fichier clients, des bulletins et des relevés pour continuer.")
+    a_des_docs = any(fics for _, fics in colonnes_docs)
+    docs_suffisants = (all(fics for _, fics in colonnes_docs) and bool(colonnes_docs)
+                       if exiger_tous else a_des_docs)
+    if not (clients and docs_suffisants):
+        if mode == "multi":
+            st.info("Chargez le fichier clients et au moins un lot de documents pour continuer.")
+        elif mode == "hebdo":
+            st.info("Chargez le fichier clients et les relevés pour continuer.")
+        else:
+            st.info("Chargez le fichier clients, des bulletins et des relevés pour continuer.")
         st.stop()
 
-    options_bp = [AUCUN] + [f.name for f in bulletins]
-    options_rel = [AUCUN] + [f.name for f in releves]
+    options_par_col = [[AUCUN] + [f.name for f in fics] for _, fics in colonnes_docs]
 
     st.caption(
         "Le nom de chaque client est recherché dans le texte des PDF "
@@ -304,90 +362,101 @@ with onglet_envois:
             "vérifiez leurs documents à la main ci-dessous."
         )
 
-    selection = {}
-    if mode_hebdo:
-        largeurs = [3, 8, 2]
-        titres = ["**Client**", "**Relevé**", "**État**"]
-    else:
-        largeurs = [3, 4, 4, 2]
-        titres = ["**Client**", "**Bulletin de paie**", "**Relevé**", "**État**"]
+    n_cols = len(colonnes_docs)
+    largeurs = [3] + [max(3, 8 // n_cols)] * n_cols + [2]
+    titres = ["**Client**"] + [f"**{lbl}**" for lbl, _ in colonnes_docs] + ["**État**"]
     for col, titre in zip(st.columns(largeurs), titres):
         col.markdown(titre)
 
+    selection = {}
     for i, client in enumerate(clients):
-        auto_rel, nb_rel = _auto_choix(client, releves)
         ligne = st.columns(largeurs)
         ligne[0].write(f"{client.affichage}\n\n`{client.email}`")
-        if mode_hebdo:
-            choix_bp, nb_bp = AUCUN, 0
-        else:
-            auto_bp, nb_bp = _auto_choix(client, bulletins)
-            choix_bp = ligne[1].selectbox(
-                "Bulletin", options_bp, index=options_bp.index(auto_bp),
-                key=f"bp_{i}", label_visibility="collapsed",
+        choix, plusieurs = [], False
+        for j, (lbl, fics) in enumerate(colonnes_docs):
+            auto, nb = _auto_choix(client, fics)
+            opts = options_par_col[j]
+            c = ligne[1 + j].selectbox(
+                lbl, opts, index=opts.index(auto),
+                key=f"doc_{i}_{j}", label_visibility="collapsed",
             )
-        choix_rel = ligne[-2].selectbox(
-            "Relevé", options_rel, index=options_rel.index(auto_rel),
-            key=f"rel_{i}", label_visibility="collapsed",
-        )
-        if choix_rel != AUCUN and (mode_hebdo or choix_bp != AUCUN):
-            etat = "✅"
-            if nb_bp > 1 or nb_rel > 1:
+            choix.append(c)
+            if nb > 1:
+                plusieurs = True
+        retenus = [c for c in choix if c != AUCUN]
+        complet = (len(retenus) == n_cols) if exiger_tous else (len(retenus) >= 1)
+        if complet:
+            etat = f"✅ {len(retenus)} doc" if mode == "multi" else "✅"
+            if plusieurs:
                 etat = "⚠️ plusieurs candidats"
         else:
-            etat = "❌ incomplet"
+            etat = "❌ incomplet" if exiger_tous else "❌ aucun"
         ligne[-1].write(etat)
-        selection[i] = (client, choix_bp, choix_rel)
+        selection[i] = (client, choix, complet)
 
-    complets = [(c, bp, rel) for c, bp, rel in selection.values()
-                if rel != AUCUN and (mode_hebdo or bp != AUCUN)]
-    st.write(f"**{len(complets)} / {len(clients)}** dossiers complets.")
+    complets = [(c, choix) for c, choix, ok in selection.values() if ok]
+    st.write(f"**{len(complets)} / {len(clients)}** dossiers à envoyer.")
 
     # --- étape 4 : préparation des PDF
-    st.header("4 · Préparation des relevés" if mode_hebdo
-              else "4 · Fusion en un PDF par client")
+    st.header(TITRE_ETAPE4[mode])
 
     if not periode:
         st.info("Indiquez la période dans la barre latérale (elle nomme les fichiers "
                 "et l'email) — ex. « Semaine 28 » en hebdo, « Juin 2026 » en mensuel.")
         st.stop()
 
-    libelle = ("Préparer les relevés des dossiers complets" if mode_hebdo
-               else "Fusionner les dossiers complets")
-    if st.button(libelle, type="primary", disabled=not complets):
-        fichiers_par_nom = {f.name: f for f in list(bulletins) + list(releves)}
+    if st.button(LIBELLE_PREP[mode], type="primary", disabled=not complets):
+        fichiers_par_nom = {f.name: f for _, fics in colonnes_docs for f in fics}
         dossier_sortie = DATA / "fusions" / nom_fichier_sur(periode)
+        base_periode = nom_fichier_sur(periode)
         prepares = []
         barre = st.progress(0.0)
-        for i, (client, nom_bp, nom_rel) in enumerate(complets):
-            noms_sources = [nom_rel] if mode_hebdo else [nom_bp, nom_rel]
-            sources = [io.BytesIO(fichiers_par_nom[n].getvalue()) for n in noms_sources]
-            destination = dossier_sortie / (
-                f"{nom_fichier_sur(client.affichage)}_{nom_fichier_sur(periode)}.pdf"
-            )
-            fusionner(sources, destination)
-            prepares.append({"client": client, "chemin": destination})
+        for i, (client, choix) in enumerate(complets):
+            base_client = nom_fichier_sur(client.affichage)
+            if mode == "multi":
+                # une pièce jointe par document, sans fusion
+                chemins = []
+                for (lbl, _), nom in zip(colonnes_docs, choix):
+                    if nom == AUCUN:
+                        continue
+                    dest = (dossier_sortie / base_client /
+                            f"{base_client}_{nom_fichier_sur(lbl)}_{base_periode}.pdf")
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes(fichiers_par_nom[nom].getvalue())
+                    chemins.append(dest)
+            else:
+                # fusion des documents retenus en un seul PDF
+                noms = [n for n in choix if n != AUCUN]
+                sources = [io.BytesIO(fichiers_par_nom[n].getvalue()) for n in noms]
+                dest = dossier_sortie / f"{base_client}_{base_periode}.pdf"
+                fusionner(sources, dest)
+                chemins = [dest]
+            prepares.append({"client": client, "chemins": chemins})
             barre.progress((i + 1) / len(complets))
         # mémorisés avec leur contexte : pas d'envoi croisé entre modes/périodes
-        st.session_state["fusions"] = {"hebdo": mode_hebdo, "periode": periode,
+        st.session_state["fusions"] = {"mode": mode, "periode": periode,
                                        "items": prepares}
-        st.success(f"{len(prepares)} PDF prêt(s) dans `{dossier_sortie}`.")
+        total = sum(len(p["chemins"]) for p in prepares)
+        st.success(f"{total} PDF prêt(s) pour {len(prepares)} chauffeur(s) "
+                   f"dans `{dossier_sortie}`.")
 
     paquet = st.session_state.get("fusions")
     fusions = (paquet["items"]
-               if isinstance(paquet, dict) and paquet.get("hebdo") == mode_hebdo
+               if isinstance(paquet, dict) and paquet.get("mode") == mode
                and paquet.get("periode") == periode
                else [])
     if fusions:
-        with st.expander(f"Télécharger les {len(fusions)} PDF préparés"):
+        total_pdf = sum(len(f["chemins"]) for f in fusions)
+        with st.expander(f"Télécharger les {total_pdf} PDF préparés"):
             for f in fusions:
-                st.download_button(
-                    f["chemin"].name,
-                    data=f["chemin"].read_bytes(),
-                    file_name=f["chemin"].name,
-                    mime="application/pdf",
-                    key=f"dl_{f['chemin'].name}",
-                )
+                for chemin in f["chemins"]:
+                    st.download_button(
+                        chemin.name,
+                        data=chemin.read_bytes(),
+                        file_name=chemin.name,
+                        mime="application/pdf",
+                        key=f"dl_{chemin}",
+                    )
 
     # --- étape 5 : envoi
     st.header("5 · Envoi par email")
@@ -401,10 +470,9 @@ with onglet_envois:
         st.error("Renseignez votre email dans l'onglet **⚙️ Mon email** avant d'envoyer.")
         st.stop()
 
-    sujet_modele = st.text_input(
-        "Sujet", value=SUJET_HEBDO if mode_hebdo else SUJET_DEFAUT)
-    corps_modele = st.text_area(
-        "Message", value=CORPS_HEBDO if mode_hebdo else CORPS_DEFAUT, height=160)
+    sujet_defaut, corps_defaut = DEFAUTS_EMAIL[mode]
+    sujet_modele = st.text_input("Sujet", value=sujet_defaut)
+    corps_modele = st.text_area("Message", value=corps_defaut, height=160)
     st.caption("Champs disponibles : `{prenom}`, `{nom}`, `{periode}`")
 
     def _rendre(modele: str, client) -> str:
@@ -417,11 +485,12 @@ with onglet_envois:
             exemple = fusions[0]
             try:
                 envoyer(email_test, "[TEST] " + _rendre(sujet_modele, exemple["client"]),
-                        _rendre(corps_modele, exemple["client"]), [exemple["chemin"]])
+                        _rendre(corps_modele, exemple["client"]), exemple["chemins"])
             except Exception as e:
                 st.error(f"Échec du test : {e}")
             else:
-                st.success(f"Test envoyé à {email_test} (dossier de {exemple['client'].affichage}).")
+                st.success(f"Test envoyé à {email_test} — {len(exemple['chemins'])} "
+                           f"pièce(s) jointe(s) (dossier de {exemple['client'].affichage}).")
 
     # --- envoi groupé
     servis = deja_envoyes(JOURNAL_DB, periode)
@@ -442,20 +511,22 @@ with onglet_envois:
         zone = st.container()
         reussis, echoues = 0, 0
         for i, f in enumerate(a_envoyer):
-            client, chemin = f["client"], f["chemin"]
+            client, chemins = f["client"], f["chemins"]
+            noms = " ; ".join(c.name for c in chemins)
             try:
                 envoyer(client.email, _rendre(sujet_modele, client),
-                        _rendre(corps_modele, client), [chemin])
+                        _rendre(corps_modele, client), chemins)
             except Exception as e:
                 echoues += 1
                 consigner(JOURNAL_DB, periode, client.affichage, client.email,
-                          chemin.name, "échec", str(e))
+                          noms, "échec", str(e))
                 zone.error(f"{client.affichage} ({client.email}) : {e}")
             else:
                 reussis += 1
                 consigner(JOURNAL_DB, periode, client.affichage, client.email,
-                          chemin.name, "envoyé")
-                zone.write(f"✅ {client.affichage} → {client.email}")
+                          noms, "envoyé")
+                zone.write(f"✅ {client.affichage} → {client.email} "
+                           f"({len(chemins)} pièce(s))")
             barre.progress((i + 1) / len(a_envoyer))
             time.sleep(1)  # ménage le serveur SMTP (limites anti-spam)
         if echoues:

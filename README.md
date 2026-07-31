@@ -24,8 +24,13 @@ enregistrés en local dans `.env` — éditable à la main si besoin (`.env.exam
 .venv/bin/streamlit run app.py
 ```
 
-0. **Type d'envoi** en tête de l'onglet : mensuel (bulletin + relevé fusionnés)
-   ou hebdomadaire (relevé seul).
+0. **Type d'envoi** en tête de l'onglet :
+   - *Mensuel* : bulletin + relevé fusionnés en un seul PDF ;
+   - *Hebdomadaire* : relevé seul ;
+   - *Multi-documents* : plusieurs types de documents (bulletin, relevé,
+     attestation…), chacun uploadé dans son lot ; chaque chauffeur reçoit dans
+     un même email tous les documents qui le concernent, en pièces jointes
+     séparées (un chauffeur est retenu dès qu'au moins un document le concerne).
 1. **Période** dans la barre latérale (ex. « Juin 2026 », « Semaine 28 »).
 2. **Excel clients** : colonnes Nom, Prénom, Email (casse/accents indifférents).
 3. **PDF** : glisser les bulletins d'un côté, les relevés Thésée de l'autre.
