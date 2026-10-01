@@ -43,7 +43,7 @@ python3 -m venv "$APP/.venv"
 #     L'empreinte du mot de passe est fournie par l'environnement :
 #     APP_MDP_SHA256=... sudo -E bash bootstrap.sh ... ---
 if [ ! -f "$APP/.env" ]; then
-    : "${APP_MDP_SHA256:?Définissez APP_MDP_SHA256 (empreinte du mot de passe d'accès) avant de lancer}"
+    : "${APP_MDP_SHA256:?Definir APP_MDP_SHA256 - empreinte du mot de passe - avant de lancer}"
     echo "APP_MDP_SHA256=$APP_MDP_SHA256" > "$APP/.env"
     chmod 600 "$APP/.env"
 fi
