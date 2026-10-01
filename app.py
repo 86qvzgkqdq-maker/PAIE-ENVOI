@@ -138,7 +138,7 @@ with st.sidebar:
         st.warning("Envoi d'emails non configuré : renseignez votre adresse "
                    "dans l'onglet **⚙️ Mon email**.")
     else:
-        st.success(f"Envois via {os.getenv('SMTP_USER')} ✔")
+        st.success(f"Envois via {os.getenv('SMTP_FROM') or os.getenv('SMTP_USER')} ✔")
 
     st.divider()
     st.caption(
