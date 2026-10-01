@@ -369,13 +369,30 @@ with onglet_envois:
     for col, titre in zip(st.columns(largeurs), titres):
         col.markdown(titre)
 
+    # Rapprochement automatique calculé UNE SEULE FOIS, puis mis en cache :
+    # corriger un menu plus bas ne relance plus le rapprochement de TOUS les
+    # chauffeurs (il n'est recalculé que si les fichiers ou la liste changent).
+    signature = (
+        tuple(c.cle for c in clients),
+        tuple((lbl, tuple((f.name, f.size) for f in fics))
+              for lbl, fics in colonnes_docs),
+    )
+    cache_auto = st.session_state.get("auto_cache")
+    if not cache_auto or cache_auto.get("sig") != signature:
+        with st.spinner("Rapprochement des documents… (une seule fois)"):
+            auto_map = {(i, j): _auto_choix(client, fics)
+                        for i, client in enumerate(clients)
+                        for j, (_, fics) in enumerate(colonnes_docs)}
+        st.session_state["auto_cache"] = {"sig": signature, "map": auto_map}
+    auto_map = st.session_state["auto_cache"]["map"]
+
     selection = {}
     for i, client in enumerate(clients):
         ligne = st.columns(largeurs)
         ligne[0].write(f"{client.affichage}\n\n`{client.email}`")
         choix, plusieurs = [], False
         for j, (lbl, fics) in enumerate(colonnes_docs):
-            auto, nb = _auto_choix(client, fics)
+            auto, nb = auto_map[(i, j)]
             opts = options_par_col[j]
             c = ligne[1 + j].selectbox(
                 lbl, opts, index=opts.index(auto),
