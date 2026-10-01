@@ -39,9 +39,12 @@ python3 -m venv "$APP/.venv"
 "$APP/.venv/bin/pip" install --quiet -r "$APP/requirements.txt"
 
 # --- .env : au minimum le mot de passe d'accès, pour que l'app soit protégée
-#     dès la première seconde (identifiants email ajoutés ensuite). ---
+#     dès la première seconde (identifiants email ajoutés ensuite).
+#     L'empreinte du mot de passe est fournie par l'environnement :
+#     APP_MDP_SHA256=... sudo -E bash bootstrap.sh ... ---
 if [ ! -f "$APP/.env" ]; then
-    echo "APP_MDP_SHA256=b405756cf4f642f8bab13ec5066762497fb19b72f058f0c0b095006fce28bb9a" > "$APP/.env"
+    : "${APP_MDP_SHA256:?Définissez APP_MDP_SHA256 (empreinte du mot de passe d'accès) avant de lancer}"
+    echo "APP_MDP_SHA256=$APP_MDP_SHA256" > "$APP/.env"
     chmod 600 "$APP/.env"
 fi
 
