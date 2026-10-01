@@ -48,24 +48,43 @@ def tester_connexion() -> None:
         pass
 
 
-def envoyer(destinataire: str, sujet: str, corps: str, pieces_jointes: list[Path]) -> None:
-    """Envoie un email. Lève une exception en cas d'échec (à afficher à l'utilisateur)."""
+def _construire_message(destinataire: str, sujet: str, corps: str,
+                        pieces_jointes: list[Path]) -> EmailMessage:
     expediteur = os.getenv("SMTP_FROM") or os.environ["SMTP_USER"]
-
     message = EmailMessage()
     message["From"] = expediteur
     message["To"] = destinataire
     message["Subject"] = sujet
     message.set_content(corps)
-
     for piece in pieces_jointes:
         piece = Path(piece)
         message.add_attachment(
             piece.read_bytes(),
-            maintype="application",
-            subtype="pdf",
-            filename=piece.name,
+            maintype="application", subtype="pdf", filename=piece.name,
         )
+    return message
 
+
+def envoyer(destinataire: str, sujet: str, corps: str, pieces_jointes: list[Path]) -> None:
+    """Envoie UN email (ouvre une connexion). Pour un test ou un envoi isolé."""
+    message = _construire_message(destinataire, sujet, corps, pieces_jointes)
     with _session() as smtp:
         smtp.send_message(message)
+
+
+@contextmanager
+def session_envoi():
+    """Ouvre UNE connexion SMTP réutilisable pour un envoi en lot.
+
+    Évite de se reconnecter à chaque email (indispensable pour ~350 envois :
+    plus rapide, et beaucoup moins de risque de blocage côté serveur).
+
+        with session_envoi() as envoyer_un:
+            for dest, sujet, corps, pj in lot:
+                envoyer_un(dest, sujet, corps, pj)   # lève si échec
+    """
+    with _session() as smtp:
+        def _envoyer_un(destinataire, sujet, corps, pieces_jointes):
+            smtp.send_message(
+                _construire_message(destinataire, sujet, corps, pieces_jointes))
+        yield _envoyer_un

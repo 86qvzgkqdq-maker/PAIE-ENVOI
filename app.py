@@ -17,7 +17,8 @@ from paie.acces import verifier
 from paie.clients import ErreurColonnes, charger_clients
 from paie.config import (MDP_APPLICATION, detecter_smtp,
                          detecter_smtp_entreprise, enregistrer_env)
-from paie.courrier import config_manquante, envoyer, tester_connexion
+from paie.courrier import (config_manquante, envoyer, session_envoi,
+                           tester_connexion)
 from paie.fusion import fusionner, nom_fichier_sur
 from paie.journal import consigner, deja_envoyes, historique
 from paie.rapprochement import clients_dans_texte, extraire_texte
@@ -510,29 +511,42 @@ with onglet_envois:
         barre = st.progress(0.0)
         zone = st.container()
         reussis, echoues = 0, 0
-        for i, f in enumerate(a_envoyer):
-            client, chemins = f["client"], f["chemins"]
-            noms = " ; ".join(c.name for c in chemins)
-            try:
-                envoyer(client.email, _rendre(sujet_modele, client),
-                        _rendre(corps_modele, client), chemins)
-            except Exception as e:
-                echoues += 1
-                consigner(JOURNAL_DB, periode, client.affichage, client.email,
-                          noms, "échec", str(e))
-                zone.error(f"{client.affichage} ({client.email}) : {e}")
-            else:
-                reussis += 1
-                consigner(JOURNAL_DB, periode, client.affichage, client.email,
-                          noms, "envoyé")
-                zone.write(f"✅ {client.affichage} → {client.email} "
-                           f"({len(chemins)} pièce(s))")
-            barre.progress((i + 1) / len(a_envoyer))
-            time.sleep(1)  # ménage le serveur SMTP (limites anti-spam)
-        if echoues:
-            st.warning(f"{reussis} envoyé(s), {echoues} échec(s) — voir le journal.")
+        total = len(a_envoyer)
+        try:
+            # Une seule connexion SMTP pour tout le lot (indispensable pour ~350
+            # envois : rapide, et ménage le serveur). Pause courte entre chaque.
+            with session_envoi() as envoyer_un:
+                for i, f in enumerate(a_envoyer):
+                    client, chemins = f["client"], f["chemins"]
+                    noms = " ; ".join(c.name for c in chemins)
+                    try:
+                        envoyer_un(client.email, _rendre(sujet_modele, client),
+                                   _rendre(corps_modele, client), chemins)
+                    except smtplib.SMTPServerDisconnected:
+                        st.warning(f"Connexion email interrompue après {reussis} envoi(s). "
+                                   "Relancez « Tout envoyer » pour reprendre "
+                                   "(les déjà-envoyés seront ignorés).")
+                        break
+                    except Exception as e:
+                        echoues += 1
+                        consigner(JOURNAL_DB, periode, client.affichage, client.email,
+                                  noms, "échec", str(e))
+                        zone.error(f"{client.affichage} ({client.email}) : {e}")
+                    else:
+                        reussis += 1
+                        consigner(JOURNAL_DB, periode, client.affichage, client.email,
+                                  noms, "envoyé")
+                        zone.write(f"✅ {client.affichage} → {client.email} "
+                                   f"({len(chemins)} pièce(s))")
+                    barre.progress((i + 1) / total)
+                    time.sleep(0.4)  # pause courte (ménage les limites d'envoi)
+        except Exception as e:
+            st.error(f"Impossible de se connecter au serveur email : {e}")
         else:
-            st.success(f"Tous les emails envoyés ({reussis}).")
+            if echoues:
+                st.warning(f"{reussis} envoyé(s), {echoues} échec(s) — voir le journal.")
+            else:
+                st.success(f"Tous les emails envoyés ({reussis}).")
 
     # --- journal
     with st.expander("Journal des envois"):
