@@ -39,7 +39,7 @@ try:
 except Exception:
     pass  # pas de fichier secrets en local
 
-st.set_page_config(page_title="Paie & Relevés", page_icon="📨", layout="wide")
+st.set_page_config(page_title="Paie Coopérative LMDVTC", page_icon="📨", layout="wide")
 
 # ------------------------------------------------------------- accès protégé
 MDP_HASH = os.getenv("APP_MDP_SHA256", "").strip()
@@ -62,7 +62,8 @@ if MDP_HASH and not st.session_state.get("authentifie"):
             st.error("Mot de passe incorrect.")
     st.stop()
 
-st.title("📨 Bulletins de paie + relevés Thésée → fusion → envoi")
+st.title("📨 Paie Coopérative LMDVTC")
+st.caption("Bulletins de paie + relevés Thésée → fusion → envoi")
 
 AUCUN = "— aucun —"
 
