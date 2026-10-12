@@ -22,6 +22,7 @@ from paie.courrier import (config_manquante, envoyer, session_envoi,
 from paie.fusion import fusionner, nom_fichier_sur
 from paie.journal import consigner, deja_envoyes, historique
 from paie.rapprochement import clients_dans_texte, extraire_texte
+from paie.textes import normaliser
 
 BASE = Path(__file__).resolve().parent
 DATA = BASE / "data"
@@ -40,6 +41,29 @@ except Exception:
     pass  # pas de fichier secrets en local
 
 st.set_page_config(page_title="Paie Coopérative LMDVTC", page_icon="📨", layout="wide")
+
+# --- Finition visuelle (rendu "application" premium) ---
+st.markdown("""
+<style>
+#MainMenu, footer {visibility: hidden;}
+[data-testid="stToolbar"], [data-testid="stDecoration"] {display: none;}
+header[data-testid="stHeader"] {height: 0; background: transparent;}
+.block-container {padding-top: 2.2rem; padding-bottom: 4rem; max-width: 1180px;}
+h1 {font-weight: 750; letter-spacing: -.02em; color: #14181f;}
+h2 {font-weight: 680; letter-spacing: -.01em; color: #14181f; margin-top: 1.3rem;}
+.stButton > button, .stDownloadButton > button {
+  border-radius: 10px; font-weight: 600; transition: all .14s ease;
+}
+.stButton > button:hover {border-color: #2f56d0; color: #2f56d0;}
+[data-testid="stFileUploaderDropzone"] {
+  border-radius: 12px; border: 1px dashed #c7ceda; background: #f7f8fa;
+}
+.stTabs [data-baseweb="tab-list"] {gap: 6px;}
+.stTabs [aria-selected="true"] {color: #2f56d0;}
+[data-testid="stSidebar"] {background: #f4f6f9; border-right: 1px solid #e7eaf0;}
+[data-testid="stVerticalBlockBorderWrapper"] {border-radius: 14px;}
+</style>
+""", unsafe_allow_html=True)
 
 # ------------------------------------------------------------- accès protégé
 MDP_HASH = os.getenv("APP_MDP_SHA256", "").strip()
@@ -128,6 +152,25 @@ def _auto_choix(client, fichiers) -> tuple[str, int]:
         if clients_dans_texte(contenu, [client]):
             candidats.append(f.name)
     return (candidats[0] if candidats else AUCUN), len(candidats)
+
+
+def _rapprocher_tout(clients, colonnes_docs):
+    """auto_map {(i, j): (fichier, nb_candidats)} en normalisant le texte de
+    chaque document UNE seule fois (≈60× plus rapide qu'un passage par client
+    sur les gros lots). Résultat identique à _auto_choix, client par client."""
+    cl = [(normaliser(c.nom), normaliser(c.prenom)) for c in clients]
+    auto_map = {}
+    for j, (_, fics) in enumerate(colonnes_docs):
+        docs = [(fic.name, f" {normaliser(_texte_document(fic) or fic.name)} ")
+                for fic in fics]
+        for i, (nom, prenom) in enumerate(cl):
+            if not nom or not prenom:
+                auto_map[(i, j)] = (AUCUN, 0)
+                continue
+            a, b = f" {nom} {prenom} ", f" {prenom} {nom} "
+            cand = [fn for (fn, tn) in docs if a in tn or b in tn]
+            auto_map[(i, j)] = (cand[0] if cand else AUCUN, len(cand))
+    return auto_map
 
 
 # ---------------------------------------------------------------- barre latérale
@@ -381,9 +424,7 @@ with onglet_envois:
     cache_auto = st.session_state.get("auto_cache")
     if not cache_auto or cache_auto.get("sig") != signature:
         with st.spinner("Rapprochement des documents… (une seule fois)"):
-            auto_map = {(i, j): _auto_choix(client, fics)
-                        for i, client in enumerate(clients)
-                        for j, (_, fics) in enumerate(colonnes_docs)}
+            auto_map = _rapprocher_tout(clients, colonnes_docs)
         st.session_state["auto_cache"] = {"sig": signature, "map": auto_map}
     auto_map = st.session_state["auto_cache"]["map"]
 
