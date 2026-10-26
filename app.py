@@ -176,7 +176,6 @@ def _rapprocher_tout(clients, colonnes_docs):
 # ---------------------------------------------------------------- barre latérale
 with st.sidebar:
     st.header("Paramètres")
-    periode = st.text_input("Période", placeholder="ex. Juin 2026 · Semaine 28")
 
     if config_manquante():
         st.warning("Envoi d'emails non configuré : renseignez votre adresse "
@@ -303,6 +302,18 @@ with onglet_envois:
         "Type d'envoi", list(MODE_LABELS),
         format_func=lambda k: MODE_LABELS[k], horizontal=True,
     )
+
+    # --- période de l'envoi (encadré) : nomme les fichiers et l'email
+    with st.container(border=True):
+        st.markdown("#### 🗓️ Période de l'envoi")
+        periode = st.text_input(
+            "Période",
+            placeholder="ex. Octobre 2026 · Semaine 43",
+            label_visibility="collapsed",
+            help="Elle nomme les fichiers générés et apparaît dans l'objet et le corps de l'email.",
+        )
+        if not periode:
+            st.caption("À renseigner — la période nomme les fichiers et apparaît dans l'email.")
 
     # --- étape 1 : clients
     st.header("1 · Fichier clients (Excel)")
@@ -461,8 +472,9 @@ with onglet_envois:
     st.header(TITRE_ETAPE4[mode])
 
     if not periode:
-        st.info("Indiquez la période dans la barre latérale (elle nomme les fichiers "
-                "et l'email) — ex. « Semaine 28 » en hebdo, « Juin 2026 » en mensuel.")
+        st.info("Indiquez la période dans l'encadré « 🗓️ Période de l'envoi » en haut "
+                "(elle nomme les fichiers et l'email) — ex. « Semaine 43 » en hebdo, "
+                "« Octobre 2026 » en mensuel.")
         st.stop()
 
     if st.button(LIBELLE_PREP[mode], type="primary", disabled=not complets):
