@@ -385,13 +385,23 @@ with onglet_comm:
                                    + (f" avec la pièce jointe « {piece.name} »." if piece else "."))
 
             nb = len(restants)
-            conf = st.checkbox(f"Je confirme la diffusion à {nb} destinataire(s).", key="comm_conf")
-            if st.button(f"📣 Envoyer à tous en une fois ({nb})", type="primary",
-                         disabled=not (conf and nb), key="comm_send"):
+            if nb:
+                a_envoyer = st.number_input(
+                    "Nombre à envoyer à ce clic", min_value=1, max_value=nb, value=nb, step=10,
+                    key="comm_clic",
+                    help="Laissez le total pour tout envoyer d'un coup, ou limitez (ex. 50) pour envoyer "
+                         "par vagues. Les destinataires déjà servis sont automatiquement retirés de la liste "
+                         "au prochain clic (tant que le « Nom de la communication » reste le même).")
+            else:
+                a_envoyer = 0
+            cibles = list(restants.keys())[: int(a_envoyer)]
+            conf = st.checkbox(f"Je confirme l'envoi à {len(cibles)} destinataire(s).", key="comm_conf")
+            if st.button(f"📣 Envoyer maintenant ({len(cibles)})", type="primary",
+                         disabled=not (conf and cibles), key="comm_send"):
                 pj = _ecrire_piece(piece)
                 nom_pj = piece.name if piece else "—"
-                with st.spinner(f"Diffusion à {nb} destinataire(s)…"):
-                    resultats = envoyer_diffusion(list(restants.keys()), sujet_comm, corps_comm, pj, int(taille_lot))
+                with st.spinner(f"Diffusion à {len(cibles)} destinataire(s)…"):
+                    resultats = envoyer_diffusion(cibles, sujet_comm, corps_comm, pj, int(taille_lot))
                 reussis = echoues = 0
                 for lot_emails, err in resultats:
                     for e in lot_emails:
@@ -403,7 +413,7 @@ with onglet_comm:
                         else:
                             consigner(JOURNAL_DB, cle, nom, e, nom_pj, "échec", err)
                             echoues += 1
-                non_tente = nb - reussis - echoues
+                non_tente = len(cibles) - reussis - echoues
                 nb_messages = sum(1 for _, er in resultats if er is None)
                 st.success(f"Diffusion terminée : **{reussis} destinataire(s) servi(s)** "
                            f"en {nb_messages} message(s), {echoues} échec(s).")
