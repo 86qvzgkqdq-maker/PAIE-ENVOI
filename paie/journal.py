@@ -46,6 +46,16 @@ def deja_envoyes(chemin_db: Path, periode: str) -> set[str]:
     return {l[0] for l in lignes}
 
 
+def dernier_envoi(chemin_db: Path, periode: str) -> str:
+    """Horodatage du dernier email envoyé avec succès pour cette période (ou '')."""
+    with _connexion(chemin_db) as conn:
+        r = conn.execute(
+            "SELECT MAX(horodatage) FROM envois WHERE periode = ? AND statut = 'envoyé'",
+            (periode,),
+        ).fetchone()
+    return r[0] if r and r[0] else ""
+
+
 def historique(chemin_db: Path, limite: int = 200) -> list[tuple]:
     with _connexion(chemin_db) as conn:
         return conn.execute(

@@ -7,7 +7,9 @@ import io
 import os
 import re
 import smtplib
+import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
@@ -20,7 +22,7 @@ from paie.config import (MDP_APPLICATION, detecter_smtp,
 from paie.courrier import (config_manquante, envoyer, session_envoi,
                            tester_connexion)
 from paie.fusion import fusionner, nom_fichier_sur
-from paie.journal import consigner, deja_envoyes, historique
+from paie.journal import consigner, deja_envoyes, dernier_envoi, historique
 from paie.rapprochement import clients_dans_texte, extraire_texte
 from paie.textes import normaliser
 
@@ -189,7 +191,18 @@ with st.sidebar:
         "destinataires, via votre propre serveur d'email."
     )
 
-onglet_envois, onglet_config = st.tabs(["📨 Envoi des documents", "⚙️ Mon email"])
+onglet_envois, onglet_comm, onglet_config = st.tabs(
+    ["📨 Envoi des documents", "📣 Communication groupée", "⚙️ Mon email"])
+
+
+def _ecrire_piece(uploaded):
+    """Écrit la pièce jointe téléversée dans un fichier temporaire ; renvoie [chemin] ou []."""
+    if not uploaded:
+        return []
+    dossier = Path(tempfile.mkdtemp(prefix="comm_"))
+    chemin = dossier / uploaded.name
+    chemin.write_bytes(uploaded.getvalue())
+    return [chemin]
 
 # ---------------------------------------------------------------- onglet : mon email
 # (rendu en premier dans le code : l'onglet Envois peut interrompre le script)
@@ -295,6 +308,133 @@ with onglet_config:
             st.error(f"Échec de connexion : {e}")
         else:
             st.success("Connexion réussie ✔ — l'envoi est opérationnel.")
+
+# ---------------------------------------------------------------- onglet : communication groupée
+# (sans st.stop : rendu conditionnel pour ne pas interrompre les autres onglets)
+with onglet_comm:
+    st.subheader("📣 Communication groupée aux chauffeurs")
+    st.caption("Un même message — avec une pièce jointe unique optionnelle (affiche, PDF…) — "
+               "envoyé à toute la liste. Envoi **par lots** pour respecter la limite du fournisseur.")
+
+    if config_manquante():
+        st.error("Renseignez d'abord votre email dans l'onglet **⚙️ Mon email**.")
+    else:
+        st.markdown("##### 1 · Liste des destinataires (Excel)")
+        fichier_comm = st.file_uploader(
+            "Fichier .xlsx avec colonnes Nom, Prénom, Email", type=["xlsx"], key="comm_xlsx")
+        clients_comm = []
+        if fichier_comm:
+            try:
+                clients_comm = charger_clients(io.BytesIO(fichier_comm.getvalue()))
+            except ErreurColonnes as e:
+                st.error(str(e))
+            else:
+                avec_mail = sum(1 for c in clients_comm if (c.email or "").strip())
+                st.success(f"{len(clients_comm)} contact(s) chargé(s) — {avec_mail} avec un email.")
+
+        st.markdown("##### 2 · Message")
+        identifiant = st.text_input(
+            "Nom de la communication (pour le suivi et la reprise des lots)",
+            placeholder="ex. Concours affiche — novembre 2026", key="comm_id",
+            help="Sert à ne pas renvoyer deux fois au même chauffeur et à reprendre au prochain lot.")
+        sujet_comm = st.text_input("Sujet", key="comm_sujet", placeholder="ex. Participez au concours !")
+        corps_comm = st.text_area(
+            "Message", height=180, key="comm_corps",
+            placeholder="Bonjour {prenom},\n\n…\n\nBien cordialement,")
+        st.caption("Champs disponibles : `{prenom}`, `{nom}`")
+        piece = st.file_uploader(
+            "3 · Pièce jointe unique (optionnel — le même fichier pour tous)",
+            type=["pdf", "png", "jpg", "jpeg"], key="comm_piece")
+
+        st.markdown("##### 4 · Envoi par lots")
+        lot_max = st.number_input(
+            "Emails par lot", min_value=1, max_value=500, value=100, step=10, key="comm_lot",
+            help="Limite du fournisseur (ex. 100), puis ~1h d'attente avant le lot suivant.")
+        st.info("ℹ️ Le fournisseur limite à ~100 emails par envoi, puis impose ~1h d'attente. "
+                "Envoyez un lot, patientez ~1h, puis revenez : les déjà-envoyés sont automatiquement ignorés.")
+
+        pret = bool(clients_comm) and identifiant.strip() and sujet_comm.strip() and corps_comm.strip()
+        if not pret:
+            st.caption("Complétez la liste, le nom de la communication, le sujet et le message pour activer l'envoi.")
+        else:
+            cle = "COMM:" + identifiant.strip()
+            servis = deja_envoyes(JOURNAL_DB, cle)
+            vus, restants = set(), []
+            for c in clients_comm:
+                e = (c.email or "").strip()
+                if not e or e in vus or e in servis:
+                    continue
+                vus.add(e)
+                restants.append(c)
+            total_valides = len({(c.email or "").strip() for c in clients_comm if (c.email or "").strip()})
+            st.write(f"**{total_valides - len(restants)}/{total_valides}** déjà envoyés · "
+                     f"**{len(restants)}** restant(s).")
+
+            dern = dernier_envoi(JOURNAL_DB, cle)
+            if dern and restants:
+                try:
+                    ecoule = (datetime.now() - datetime.fromisoformat(dern)).total_seconds()
+                except ValueError:
+                    ecoule = 3601
+                if ecoule < 3600:
+                    reste = int((3600 - ecoule) // 60) + 1
+                    st.warning(f"⏳ Dernier lot il y a {int(ecoule // 60)} min — patientez encore "
+                               f"~{reste} min (délai d'~1h) avant le prochain lot.")
+
+            lot = restants[: int(lot_max)]
+
+            def _rendre_comm(modele, c):
+                try:
+                    return modele.format(prenom=c.prenom, nom=c.nom)
+                except (KeyError, IndexError):
+                    return modele
+
+            with st.expander("Envoyer un email de test (recommandé)"):
+                email_test = st.text_input("Adresse de test", value=os.getenv("SMTP_USER", ""), key="comm_test")
+                if st.button("Envoyer le test", disabled=not email_test, key="comm_btn_test"):
+                    try:
+                        ex = clients_comm[0]
+                        envoyer(email_test, "[TEST] " + sujet_comm, _rendre_comm(corps_comm, ex), _ecrire_piece(piece))
+                    except Exception as e:
+                        st.error(f"Échec du test : {e}")
+                    else:
+                        st.success(f"Test envoyé à {email_test}"
+                                   + (f" avec la pièce jointe « {piece.name} »." if piece else "."))
+
+            conf = st.checkbox(f"Je confirme l'envoi de ce lot de {len(lot)} email(s).", key="comm_conf")
+            if st.button(f"📣 Envoyer le lot (jusqu'à {len(lot)} emails)", type="primary",
+                         disabled=not (conf and lot), key="comm_send"):
+                pj = _ecrire_piece(piece)
+                nom_pj = piece.name if piece else "—"
+                barre = st.progress(0.0)
+                zone = st.container()
+                reussis = echoues = 0
+                total = len(lot)
+                try:
+                    with session_envoi() as envoyer_un:
+                        for i, c in enumerate(lot):
+                            try:
+                                envoyer_un(c.email, sujet_comm, _rendre_comm(corps_comm, c), pj)
+                            except smtplib.SMTPServerDisconnected:
+                                st.warning(f"Connexion interrompue après {reussis} envoi(s) — "
+                                           "probablement la limite du fournisseur atteinte. "
+                                           "Patientez ~1h puis relancez (reprise automatique).")
+                                break
+                            except Exception as e:
+                                echoues += 1
+                                consigner(JOURNAL_DB, cle, c.affichage, c.email, nom_pj, "échec", str(e))
+                                zone.error(f"{c.affichage} ({c.email}) : {e}")
+                            else:
+                                reussis += 1
+                                consigner(JOURNAL_DB, cle, c.affichage, c.email, nom_pj, "envoyé")
+                            barre.progress((i + 1) / total)
+                            time.sleep(0.15)
+                finally:
+                    barre.empty()
+                st.success(f"Lot terminé : **{reussis} envoyé(s)**, {echoues} échec(s). "
+                           f"Restant à envoyer : **{len(restants) - reussis}**.")
+                if len(restants) - reussis > 0:
+                    st.info("⏳ Patientez ~1h, puis revenez envoyer le prochain lot.")
 
 # ---------------------------------------------------------------- onglet : envois
 with onglet_envois:

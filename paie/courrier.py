@@ -10,6 +10,7 @@ Deux modes, choisis automatiquement d'après les variables d'environnement :
 
 import base64
 import json
+import mimetypes
 import os
 import smtplib
 import ssl
@@ -109,8 +110,10 @@ def _construire_message(destinataire, sujet, corps, pieces_jointes) -> EmailMess
     message.set_content(corps)
     for piece in pieces_jointes:
         piece = Path(piece)
-        message.add_attachment(piece.read_bytes(), maintype="application",
-                               subtype="pdf", filename=piece.name)
+        typ, _ = mimetypes.guess_type(piece.name)
+        maintype, subtype = (typ.split("/", 1) if typ else ("application", "octet-stream"))
+        message.add_attachment(piece.read_bytes(), maintype=maintype,
+                               subtype=subtype, filename=piece.name)
     return message
 
 
