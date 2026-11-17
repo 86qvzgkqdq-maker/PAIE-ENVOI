@@ -151,3 +151,52 @@ def session_envoi():
         with _session() as smtp:
             yield lambda d, s, c, pj: smtp.send_message(
                 _construire_message(d, s, c, pj))
+
+
+def envoyer_diffusion(destinataires, sujet, corps, pieces_jointes, taille_lot: int = 50):
+    """Diffusion : le MÊME message à tous, en copie cachée (BCC), par paquets.
+
+    Beaucoup plus rapide qu'un envoi individuel (un message couvre tout un paquet).
+    Les destinataires ne se voient pas entre eux. Renvoie une liste de résultats
+    par paquet : [(liste_emails, erreur_ou_None), …] — un paquet sans erreur = servi.
+    """
+    dests = list(dict.fromkeys(d.strip() for d in destinataires if d and d.strip()))
+    paquets = [dests[i:i + taille_lot] for i in range(0, len(dests), taille_lot)]
+    resultats = []
+    if _mode_brevo():
+        for lot in paquets:
+            try:
+                payload = {
+                    "sender": {"email": _expediteur()},
+                    "to": [{"email": _expediteur()}],
+                    "bcc": [{"email": d} for d in lot],
+                    "subject": sujet,
+                    "textContent": corps,
+                    "attachment": [
+                        {"content": base64.b64encode(Path(p).read_bytes()).decode(),
+                         "name": Path(p).name}
+                        for p in pieces_jointes
+                    ],
+                }
+                _brevo_requete("/smtp/email", "POST", payload)
+                resultats.append((lot, None))
+            except Exception as e:  # noqa: BLE001
+                resultats.append((lot, str(e)))
+    else:
+        try:
+            with _session() as smtp:
+                for lot in paquets:
+                    try:
+                        # To = expéditeur (les destinataires réels sont en enveloppe = BCC)
+                        message = _construire_message(_expediteur(), sujet, corps, pieces_jointes)
+                        smtp.send_message(message, to_addrs=lot)
+                        resultats.append((lot, None))
+                    except smtplib.SMTPServerDisconnected:
+                        # limite fournisseur atteinte : on s'arrête, le reste sera repris
+                        resultats.append((lot, "connexion interrompue (limite fournisseur)"))
+                        break
+                    except Exception as e:  # noqa: BLE001
+                        resultats.append((lot, str(e)))
+        except Exception as e:  # noqa: BLE001 — connexion impossible d'emblée
+            resultats.append((dests, str(e)))
+    return resultats

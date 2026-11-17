@@ -19,8 +19,8 @@ from paie.acces import verifier
 from paie.clients import ErreurColonnes, charger_clients
 from paie.config import (MDP_APPLICATION, detecter_smtp,
                          detecter_smtp_entreprise, enregistrer_env)
-from paie.courrier import (config_manquante, envoyer, session_envoi,
-                           tester_connexion)
+from paie.courrier import (config_manquante, envoyer, envoyer_diffusion,
+                           session_envoi, tester_connexion)
 from paie.fusion import fusionner, nom_fichier_sur
 from paie.journal import consigner, deja_envoyes, dernier_envoi, historique
 from paie.rapprochement import clients_dans_texte, extraire_texte
@@ -340,18 +340,19 @@ with onglet_comm:
         sujet_comm = st.text_input("Sujet", key="comm_sujet", placeholder="ex. Participez au concours !")
         corps_comm = st.text_area(
             "Message", height=180, key="comm_corps",
-            placeholder="Bonjour {prenom},\n\n…\n\nBien cordialement,")
-        st.caption("Champs disponibles : `{prenom}`, `{nom}`")
+            placeholder="Bonjour,\n\n…\n\nBien cordialement,")
         piece = st.file_uploader(
             "3 · Pièce jointe unique (optionnel — le même fichier pour tous)",
             type=["pdf", "png", "jpg", "jpeg"], key="comm_piece")
 
-        st.markdown("##### 4 · Envoi par lots")
-        lot_max = st.number_input(
-            "Emails par lot", min_value=1, max_value=500, value=100, step=10, key="comm_lot",
-            help="Limite du fournisseur (ex. 100), puis ~1h d'attente avant le lot suivant.")
-        st.info("ℹ️ Le fournisseur limite à ~100 emails par envoi, puis impose ~1h d'attente. "
-                "Envoyez un lot, patientez ~1h, puis revenez : les déjà-envoyés sont automatiquement ignorés.")
+        st.markdown("##### 4 · Diffusion (rapide, à tous en même temps)")
+        taille_lot = st.number_input(
+            "Destinataires par message (copie cachée)", min_value=1, max_value=200, value=50, step=10,
+            key="comm_lot",
+            help="On envoie UN message par paquet, tous les destinataires en copie cachée (ils ne se "
+                 "voient pas). Beaucoup plus rapide que des envois un par un. Baissez si le fournisseur "
+                 "refuse les gros paquets.")
+        st.caption("Message **identique pour tous** (diffusion) — pas de personnalisation par prénom.")
 
         pret = bool(clients_comm) and identifiant.strip() and sujet_comm.strip() and corps_comm.strip()
         if not pret:
@@ -359,82 +360,53 @@ with onglet_comm:
         else:
             cle = "COMM:" + identifiant.strip()
             servis = deja_envoyes(JOURNAL_DB, cle)
-            vus, restants = set(), []
+            restants = {}
             for c in clients_comm:
                 e = (c.email or "").strip()
-                if not e or e in vus or e in servis:
-                    continue
-                vus.add(e)
-                restants.append(c)
+                if e and e not in servis and e not in restants:
+                    restants[e] = c
             total_valides = len({(c.email or "").strip() for c in clients_comm if (c.email or "").strip()})
             st.write(f"**{total_valides - len(restants)}/{total_valides}** déjà envoyés · "
                      f"**{len(restants)}** restant(s).")
-
-            dern = dernier_envoi(JOURNAL_DB, cle)
-            if dern and restants:
-                try:
-                    ecoule = (datetime.now() - datetime.fromisoformat(dern)).total_seconds()
-                except ValueError:
-                    ecoule = 3601
-                if ecoule < 3600:
-                    reste = int((3600 - ecoule) // 60) + 1
-                    st.warning(f"⏳ Dernier lot il y a {int(ecoule // 60)} min — patientez encore "
-                               f"~{reste} min (délai d'~1h) avant le prochain lot.")
-
-            lot = restants[: int(lot_max)]
-
-            def _rendre_comm(modele, c):
-                try:
-                    return modele.format(prenom=c.prenom, nom=c.nom)
-                except (KeyError, IndexError):
-                    return modele
 
             with st.expander("Envoyer un email de test (recommandé)"):
                 email_test = st.text_input("Adresse de test", value=os.getenv("SMTP_USER", ""), key="comm_test")
                 if st.button("Envoyer le test", disabled=not email_test, key="comm_btn_test"):
                     try:
-                        ex = clients_comm[0]
-                        envoyer(email_test, "[TEST] " + sujet_comm, _rendre_comm(corps_comm, ex), _ecrire_piece(piece))
+                        envoyer(email_test, "[TEST] " + sujet_comm, corps_comm, _ecrire_piece(piece))
                     except Exception as e:
                         st.error(f"Échec du test : {e}")
                     else:
                         st.success(f"Test envoyé à {email_test}"
                                    + (f" avec la pièce jointe « {piece.name} »." if piece else "."))
 
-            conf = st.checkbox(f"Je confirme l'envoi de ce lot de {len(lot)} email(s).", key="comm_conf")
-            if st.button(f"📣 Envoyer le lot (jusqu'à {len(lot)} emails)", type="primary",
-                         disabled=not (conf and lot), key="comm_send"):
+            nb = len(restants)
+            conf = st.checkbox(f"Je confirme la diffusion à {nb} destinataire(s).", key="comm_conf")
+            if st.button(f"📣 Envoyer à tous en une fois ({nb})", type="primary",
+                         disabled=not (conf and nb), key="comm_send"):
                 pj = _ecrire_piece(piece)
                 nom_pj = piece.name if piece else "—"
-                barre = st.progress(0.0)
-                zone = st.container()
+                with st.spinner(f"Diffusion à {nb} destinataire(s)…"):
+                    resultats = envoyer_diffusion(list(restants.keys()), sujet_comm, corps_comm, pj, int(taille_lot))
                 reussis = echoues = 0
-                total = len(lot)
-                try:
-                    with session_envoi() as envoyer_un:
-                        for i, c in enumerate(lot):
-                            try:
-                                envoyer_un(c.email, sujet_comm, _rendre_comm(corps_comm, c), pj)
-                            except smtplib.SMTPServerDisconnected:
-                                st.warning(f"Connexion interrompue après {reussis} envoi(s) — "
-                                           "probablement la limite du fournisseur atteinte. "
-                                           "Patientez ~1h puis relancez (reprise automatique).")
-                                break
-                            except Exception as e:
-                                echoues += 1
-                                consigner(JOURNAL_DB, cle, c.affichage, c.email, nom_pj, "échec", str(e))
-                                zone.error(f"{c.affichage} ({c.email}) : {e}")
-                            else:
-                                reussis += 1
-                                consigner(JOURNAL_DB, cle, c.affichage, c.email, nom_pj, "envoyé")
-                            barre.progress((i + 1) / total)
-                            time.sleep(0.15)
-                finally:
-                    barre.empty()
-                st.success(f"Lot terminé : **{reussis} envoyé(s)**, {echoues} échec(s). "
-                           f"Restant à envoyer : **{len(restants) - reussis}**.")
-                if len(restants) - reussis > 0:
-                    st.info("⏳ Patientez ~1h, puis revenez envoyer le prochain lot.")
+                for lot_emails, err in resultats:
+                    for e in lot_emails:
+                        c = restants.get(e)
+                        nom = c.affichage if c else e
+                        if err is None:
+                            consigner(JOURNAL_DB, cle, nom, e, nom_pj, "envoyé")
+                            reussis += 1
+                        else:
+                            consigner(JOURNAL_DB, cle, nom, e, nom_pj, "échec", err)
+                            echoues += 1
+                non_tente = nb - reussis - echoues
+                nb_messages = sum(1 for _, er in resultats if er is None)
+                st.success(f"Diffusion terminée : **{reussis} destinataire(s) servi(s)** "
+                           f"en {nb_messages} message(s), {echoues} échec(s).")
+                if echoues or non_tente:
+                    st.warning(f"⚠️ {echoues + non_tente} non envoyé(s) — probable limite du fournisseur (OVH). "
+                               "Relancez dans un moment : les déjà-servis sont ignorés. "
+                               "Pour un envoi illimité et instantané, on branchera Brevo.")
 
 # ---------------------------------------------------------------- onglet : envois
 with onglet_envois:
