@@ -347,11 +347,15 @@ with onglet_comm:
 
         st.markdown("##### 4 · Diffusion (rapide, à tous en même temps)")
         taille_lot = st.number_input(
-            "Destinataires par message (copie cachée)", min_value=1, max_value=200, value=50, step=10,
+            "Destinataires par message (copie cachée)", min_value=1, max_value=1000, value=50, step=10,
             key="comm_lot",
             help="On envoie UN message par paquet, tous les destinataires en copie cachée (ils ne se "
-                 "voient pas). Beaucoup plus rapide que des envois un par un. Baissez si le fournisseur "
-                 "refuse les gros paquets.")
+                 "voient pas). Plus le paquet est grand, moins il y a de messages. ⚠️ OVH limite souvent "
+                 "à ~50–100 destinataires par message : au-delà, le message peut être refusé. "
+                 "Conseillé : 50–90. Pour tout envoyer en UN seul message de façon fiable, on branchera Brevo.")
+        if taille_lot > 100:
+            st.warning("⚠️ Au-delà de ~100 destinataires par message, OVH peut refuser l'envoi "
+                       "(et alors ce paquet n'arrive à personne). Restez plutôt à 50–90, ou branchez Brevo.")
         st.caption("Message **identique pour tous** (diffusion) — pas de personnalisation par prénom.")
 
         pret = bool(clients_comm) and identifiant.strip() and sujet_comm.strip() and corps_comm.strip()
