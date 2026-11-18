@@ -211,6 +211,12 @@ with onglet_config:
     st.subheader("Compte email pour les envois")
     st.caption("Enregistré uniquement sur cet ordinateur (fichier `.env` du projet).")
 
+    if os.getenv("BREVO_API_KEY"):
+        _exp = os.getenv("SMTP_FROM") or os.getenv("SMTP_USER") or ""
+        st.success(f"✅ Envoi actif **via Brevo** (API) — expéditeur `{_exp}`. "
+                   "Envoi rapide, en boîte de réception. Les réglages SMTP ci-dessous ne servent "
+                   "que si tu retires Brevo.")
+
     if st.session_state.pop("config_enregistree", False):
         st.success("Configuration enregistrée ✔ — vous pouvez tester la connexion.")
 
