@@ -63,18 +63,20 @@ def _brevo_requete(chemin: str, methode: str = "GET", corps: dict | None = None)
         raise RuntimeError(f"Brevo {e.code} : {detail}") from None
 
 
+def _pieces_brevo(pieces_jointes):
+    return [{"content": base64.b64encode(Path(p).read_bytes()).decode(), "name": Path(p).name}
+            for p in pieces_jointes]
+
+
 def _brevo_envoyer(destinataire, sujet, corps, pieces_jointes):
     payload = {
         "sender": {"email": _expediteur()},
         "to": [{"email": destinataire}],
         "subject": sujet,
         "textContent": corps,
-        "attachment": [
-            {"content": base64.b64encode(Path(p).read_bytes()).decode(),
-             "name": Path(p).name}
-            for p in pieces_jointes
-        ],
     }
+    if pieces_jointes:  # Brevo refuse un tableau "attachment" vide
+        payload["attachment"] = _pieces_brevo(pieces_jointes)
     _brevo_requete("/smtp/email", "POST", payload)
 
 
@@ -172,12 +174,9 @@ def envoyer_diffusion(destinataires, sujet, corps, pieces_jointes, taille_lot: i
                     "bcc": [{"email": d} for d in lot],
                     "subject": sujet,
                     "textContent": corps,
-                    "attachment": [
-                        {"content": base64.b64encode(Path(p).read_bytes()).decode(),
-                         "name": Path(p).name}
-                        for p in pieces_jointes
-                    ],
                 }
+                if pieces_jointes:
+                    payload["attachment"] = _pieces_brevo(pieces_jointes)
                 _brevo_requete("/smtp/email", "POST", payload)
                 resultats.append((lot, None))
             except Exception as e:  # noqa: BLE001
