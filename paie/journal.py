@@ -56,6 +56,19 @@ def dernier_envoi(chemin_db: Path, periode: str) -> str:
     return r[0] if r and r[0] else ""
 
 
+def resume(chemin_db: Path) -> list[tuple]:
+    """Agrégat par période / communication :
+    (periode, nb_envoyés, nb_échecs, premier_horodatage, dernier_horodatage)."""
+    with _connexion(chemin_db) as conn:
+        return conn.execute(
+            "SELECT periode,"
+            " SUM(CASE WHEN statut='envoyé' THEN 1 ELSE 0 END),"
+            " SUM(CASE WHEN statut='échec' THEN 1 ELSE 0 END),"
+            " MIN(horodatage), MAX(horodatage)"
+            " FROM envois GROUP BY periode ORDER BY MAX(horodatage) DESC",
+        ).fetchall()
+
+
 def historique(chemin_db: Path, limite: int = 200) -> list[tuple]:
     with _connexion(chemin_db) as conn:
         return conn.execute(

@@ -22,7 +22,8 @@ from paie.config import (MDP_APPLICATION, detecter_smtp,
 from paie.courrier import (config_manquante, envoyer, envoyer_diffusion,
                            session_envoi, tester_connexion)
 from paie.fusion import fusionner, nom_fichier_sur
-from paie.journal import consigner, deja_envoyes, dernier_envoi, historique
+from paie.journal import (consigner, deja_envoyes, dernier_envoi, historique,
+                          resume)
 from paie.rapprochement import clients_dans_texte, extraire_texte
 from paie.textes import normaliser
 
@@ -191,8 +192,8 @@ with st.sidebar:
         "destinataires, via votre propre serveur d'email."
     )
 
-onglet_envois, onglet_comm, onglet_config = st.tabs(
-    ["📨 Envoi des documents", "📣 Communication groupée", "⚙️ Mon email"])
+onglet_envois, onglet_comm, onglet_histo, onglet_config = st.tabs(
+    ["📨 Envoi des documents", "📣 Communication groupée", "📜 Historique", "⚙️ Mon email"])
 
 
 def _ecrire_piece(uploaded):
@@ -421,6 +422,49 @@ with onglet_comm:
                     st.warning(f"⚠️ {echoues + non_tente} non envoyé(s) — probable limite du fournisseur (OVH). "
                                "Relancez dans un moment : les déjà-servis sont ignorés. "
                                "Pour un envoi illimité et instantané, on branchera Brevo.")
+
+# ---------------------------------------------------------------- onglet : historique
+with onglet_histo:
+    st.subheader("📜 Historique des envois")
+    st.caption("Tout ce qui a été envoyé (paie et communications), avec la date et le statut.")
+
+    def _type_envoi(p):
+        return "📣 Communication" if str(p).startswith("COMM:") else "📅 Paie"
+
+    def _intitule(p):
+        return str(p)[5:] if str(p).startswith("COMM:") else str(p)
+
+    resumes = resume(JOURNAL_DB)
+    if not resumes:
+        st.info("Aucun envoi pour l'instant.")
+    else:
+        st.markdown("##### Par envoi / communication")
+        st.dataframe(
+            [{"Type": _type_envoi(p), "Intitulé": _intitule(p), "Envoyés": env or 0,
+              "Échecs": ech or 0, "Premier": (mn or "").replace("T", " ")[:16],
+              "Dernier": (mx or "").replace("T", " ")[:16]}
+             for (p, env, ech, mn, mx) in resumes],
+            use_container_width=True, hide_index=True)
+
+        st.markdown("##### Détail")
+        intitules = ["(tout)"] + [_intitule(p) for (p, *_rest) in resumes]
+        choix = st.selectbox("Filtrer par envoi", intitules, key="histo_filtre")
+        lignes = historique(JOURNAL_DB, 2000)
+        if choix != "(tout)":
+            lignes = [l for l in lignes if _intitule(l[1]) == choix]
+        rows = [{"Date": (l[0] or "").replace("T", " "), "Type": _type_envoi(l[1]),
+                 "Intitulé": _intitule(l[1]), "Destinataire": l[2], "Email": l[3],
+                 "Pièce": l[4], "Statut": l[5], "Erreur": l[6] or ""} for l in lignes]
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+        if rows:
+            import csv as _csv
+            import io as _io
+            buf = _io.StringIO()
+            w = _csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+            w.writeheader()
+            w.writerows(rows)
+            st.download_button("⬇️ Exporter en CSV", buf.getvalue().encode("utf-8"),
+                               file_name="historique_envois.csv", mime="text/csv", key="histo_csv")
 
 # ---------------------------------------------------------------- onglet : envois
 with onglet_envois:
@@ -746,13 +790,4 @@ with onglet_envois:
                 st.success(f"Tous les emails envoyés ({reussis}).")
 
     # --- journal
-    with st.expander("Journal des envois"):
-        lignes = historique(JOURNAL_DB)
-        if lignes:
-            st.dataframe(
-                [{"Date": l[0], "Période": l[1], "Client": l[2], "Email": l[3],
-                  "Fichier": l[4], "Statut": l[5], "Erreur": l[6] or ""} for l in lignes],
-                use_container_width=True,
-            )
-        else:
-            st.caption("Aucun envoi pour l'instant.")
+    st.caption("📜 Retrouve tout ce qui a été envoyé (date, destinataire, statut) dans l'onglet **Historique**.")
